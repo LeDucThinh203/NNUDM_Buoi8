@@ -2,7 +2,8 @@ var express = require('express');
 var router = express.Router();
 let slugify = require('slugify')
 let productSchema = require('../schemas/products')
-//mongoose --- mongoDB
+let inventorySchema = require('../schemas/inventories')
+let mongoose = require('mongoose')
 
 /* GET users listing. */
 ///api/v1/products
@@ -11,7 +12,7 @@ router.get('/', async function (req, res, next) {
   let maxPrice = req.query.maxPrice ? req.query.maxPrice : 1E4;
   let minPrice = req.query.minPrice ? req.query.minPrice : 0;
   //let categoryName = req.query.category ? req.query.category : '';
-  let data = await productSchema.find({}).populate({ path: 'category',select: 'name images' })
+  let data = await productSchema.find({}).populate({ path: 'category', select: 'name images' })
   let result = data.filter(function (e) {
     return (!e.isDeleted) &&
       e.title.toLowerCase().includes(titleQ.toLowerCase())
@@ -54,6 +55,8 @@ router.get('/:id', async function (req, res, next) {
   }
 });
 router.post('/', async function (req, res, next) {
+  let session = await mongoose.startSession();
+  session.startTransaction()
   try {
     let newObj = new productSchema({
       title: req.body.title,
@@ -62,15 +65,28 @@ router.post('/', async function (req, res, next) {
       }),
       price: req.body.price,
       description: req.body.description,
-      category: req.body.categoryId,
+      category: req.body.category,
       images: req.body.images
     })
-    await newObj.save()
-    res.send(newObj);
+    await newObj.save({ session })
+    console.log(newObj);
+    let newInventory = new inventorySchema({
+      product: newObj._id,
+      stock: -1
+    })
+    await newInventory.save({ session })
+    await session.commitTransaction();
+    await session.endSession()
+    await newInventory.populate('product')
+    res.send(newInventory);
   } catch (error) {
+    await session.abortTransaction();
+    await session.endSession()
     res.status(404).send(error.message);
   }
 })
+
+
 router.put('/:id', async function (req, res, next) {
   try {
     // let result = await productSchema.findOne(
